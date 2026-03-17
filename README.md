@@ -2,13 +2,19 @@
 
 **Absolutely anonymous knowledge retrieval** for your LLM: the world's first [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes tools to search the web and fetch pages anonymously through [Tor](https://www.torproject.org/). Search results come from DuckDuckGo, and page content is retrieved through an actual Tor Browser instance, preserving the universal fingerprint that makes Tor users indistinguishable from one another.
 
+<img width="944" height="641" alt="Onion Search MCP" src="https://github.com/user-attachments/assets/13ccada4-310d-4027-9399-701249f32c28" />
+
 ## Why this exists
 
 Millions of people use local LLMs through apps like [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.com/). Running models locally offers an extremely private and low-cost way to access information, explore ideas, and automate computation. 
 
+https://github.com/user-attachments/assets/1e07d780-8f9e-474e-a7f0-7581c4d64fcb
+
 Search tools are becoming ubiquitous in LLM chat interfaces—ChatGPT, Gemini, and others use them automatically in the background for most queries. Meanwhile, every web search integration tool recommended for local LLMs route requests through off-the-shelf installations of Google Chrome, Firefox, or Brave, which (despite their marketing) leave specific [browser fingerprints](https://coveryourtracks.eff.org/learn) that can be used to track, surveil, rate-limit, or geo-restrict you.
 
 This tool takes a different approach: every request flows through the [Tor](https://www.torproject.org/) network and browser, which routes your requests through an anonymity network and makes your traffic indistinguishable from millions of other users.
+
+
 
 ## Installation
 
