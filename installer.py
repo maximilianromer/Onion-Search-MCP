@@ -462,7 +462,7 @@ def check_venv_exists() -> bool:
 
 
 def check_requirements_installed(platform_name: str) -> bool:
-    """Check if platform requirements are already installed."""
+    """Check that installed packages satisfy the platform requirements."""
     req_file = SCRIPT_DIR / f"requirements-{platform_name}.txt"
     if not req_file.exists():
         return False
@@ -476,26 +476,20 @@ def check_requirements_installed(platform_name: str) -> bool:
         return False
 
     try:
-        result = subprocess.run(
-            [str(venv_pip), "freeze"],
+        # Let pip evaluate versions, extras and environment markers. A name-only
+        # check would skip upgrades when an installed dependency is too old.
+        # Offline dry-run mode checks without changing the environment or
+        # downloading packages; unmet requirements trigger install_requirements.
+        subprocess.run(
+            [
+                str(venv_pip), "install", "--dry-run", "--no-index",
+                "--disable-pip-version-check", "-r", str(req_file),
+            ],
             capture_output=True,
             text=True,
             check=True,
         )
-        installed = set(
-            pkg.split("==")[0].lower()
-            for pkg in result.stdout.strip().split("\n")
-            if pkg
-        )
-
-        with open(req_file) as f:
-            required = set(
-                line.strip().split(">=")[0].split("==")[0].lower()
-                for line in f
-                if line.strip() and not line.startswith("#")
-            )
-
-        return required.issubset(installed)
+        return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 

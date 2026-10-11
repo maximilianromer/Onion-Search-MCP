@@ -180,11 +180,34 @@ headless = false           # Set to true to run the TUI in headless mode (no vis
 # log_file = "tor_tui.log" # Log file for headless mode (optional, defaults to stderr)
 ```
 
+## Updating an existing installation
+
+After pulling the latest project files, rerun `python3 installer.py` (or
+`python installer.py` on Windows). The installer upgrades dependencies that no
+longer meet the required versions.
+
+DuckDuckGo search requires **DDGS 9.16.0+ and its HTTP client PRIMP 2.0.1+**.
+Older versions can return `No results found.` for ordinary queries when
+DuckDuckGo rejects requests through Tor. To update the search dependencies
+from the project directory:
+
+```sh
+# macOS / Linux
+.venv/bin/python -m pip install --upgrade "ddgs>=9.16.0" "primp>=2.0.1"
+
+# Windows
+.venv\Scripts\python.exe -m pip install --upgrade "ddgs>=9.16.0" "primp>=2.0.1"
+```
+
+Close the existing Onion Session window (or press `Ctrl+C`) and start a new
+session after updating. The persistent session keeps using its loaded search
+libraries until it restarts.
+
 ## Dependencies
 
 - [Python](https://www.python.org/) — Programming language
 - [FastMCP](https://github.com/jlowin/fastmcp) — Easy framework for building MCP servers
-- [DDGS](https://github.com/deedy5/duckduckgo_search) — Credentialless Python API for fetching DuckDuckGo search results
+- [DDGS](https://github.com/deedy5/ddgs) — Credentialless Python API for fetching DuckDuckGo search results (9.16.0+)
 - [Tor Browser](https://www.torproject.org/download/) — The anonymity web browser this project is built around
 - [Stem](https://stem.torproject.org/) — Programmatic Python controller for Tor, enabling fast connection to the Tor network before opening the browser
 - [Trafilatura](https://github.com/adbar/trafilatura) — A library used to extract and clean text content from the HTML source of fetched pages
