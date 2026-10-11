@@ -2,7 +2,8 @@
 # Python 3.11+ required
 
 fastmcp>=2.0.0
-ddgs>=7.0.0
+ddgs>=9.16.0
+primp>=2.0.1
 tbselenium>=0.8.0
 trafilatura>=1.12.0
 stem>=1.8.0
