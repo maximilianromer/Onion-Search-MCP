@@ -7,6 +7,6 @@ primp>=2.0.1
 tbselenium>=0.8.0
 trafilatura>=1.12.0
 stem>=1.8.0
-selenium>=4.0.0
+selenium>=4.0.0,<4.40.0
 pyvirtualdisplay>=3.0
 textual>=0.40.0
