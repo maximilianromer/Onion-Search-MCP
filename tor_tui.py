@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Persistent Tor Session TUI for Onion Search MCP.
+Persistent Tor Session TUI for Tor Browser MCP.
 
 Redesigned with operation cards, spinners, and a single continuous flow.
 """
 
 import atexit
+import base64
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Callable
@@ -29,6 +31,11 @@ from textual.binding import Binding
 from textual.reactive import reactive
 from textual.message import Message
 from rich.text import Text as RichText
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.support.ui import WebDriverWait
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +74,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 class HeaderWidget(Static):
-    """ASCII block letters masthead with ONION stacked over SEARCH MCP."""
+    """ASCII block letters masthead with TOR stacked over BROWSER MCP."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -75,20 +82,20 @@ class HeaderWidget(Static):
 
     def _build_display(self):
         lines = []
-        # ONION in purple gradient (top), SEARCH MCP in pale yellow (bottom)
+        # TOR in purple gradient (top), BROWSER MCP in pale yellow (bottom)
         # Pale yellow colors: #FFFCDA (light) -> #F0E5A8 (medium) -> #E5D890 (soft gold)
-        lines.append("[#875FAF] ██████╗ ███╗   ██╗██╗ ██████╗ ███╗   ██╗[/#875FAF]")
-        lines.append("[#875FAF]██╔═══██╗████╗  ██║██║██╔═══██╗████╗  ██║[/#875FAF]")
-        lines.append("[#af87d7]██║   ██║██╔██╗ ██║██║██║   ██║██╔██╗ ██║[/#af87d7]")
-        lines.append("[#af87d7]██║   ██║██║╚██╗██║██║██║   ██║██║╚██╗██║[/#af87d7]")
-        lines.append("[#d7afff]╚██████╔╝██║ ╚████║██║╚██████╔╝██║ ╚████║[/#d7afff]")
-        lines.append("[#d7afff] ╚═════╝ ╚═╝  ╚═══╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝[/#d7afff]")
-        lines.append("[#FFFCDA]███████╗███████╗ █████╗ ██████╗  ██████╗██╗  ██╗    ███╗   ███╗ ██████╗██████╗ [/#FFFCDA]")
-        lines.append("[#FFFCDA]██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██║  ██║    ████╗ ████║██╔════╝██╔══██╗[/#FFFCDA]")
-        lines.append("[#F0E5A8]███████╗█████╗  ███████║██████╔╝██║     ███████║    ██╔████╔██║██║     ██████╔╝[/#F0E5A8]")
-        lines.append("[#F0E5A8]╚════██║██╔══╝  ██╔══██║██╔══██╗██║     ██╔══██║    ██║╚██╔╝██║██║     ██╔═══╝ [/#F0E5A8]")
-        lines.append("[#E5D890]███████║███████╗██║  ██║██║  ██║╚██████╗██║  ██║    ██║ ╚═╝ ██║╚██████╗██║     [/#E5D890]")
-        lines.append("[#E5D890]╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝    ╚═╝     ╚═╝ ╚═════╝╚═╝     [/#E5D890]")
+        lines.append("[#875FAF]████████╗ ██████╗ ██████╗  [/#875FAF]")
+        lines.append("[#875FAF]╚══██╔══╝██╔═══██╗██╔══██╗ [/#875FAF]")
+        lines.append("[#d7afff]   ██║   ██║   ██║██████╔╝ [/#d7afff]")
+        lines.append("[#d7afff]   ██║   ██║   ██║██╔══██╗ [/#d7afff]")
+        lines.append("[#d7afff]   ██║   ╚██████╔╝██║  ██║ [/#d7afff]")
+        lines.append("[#d7afff]   ╚═╝    ╚═════╝ ╚═╝  ╚═╝ [/#d7afff]")
+        lines.append("[#FFFCDA]██████╗ ██████╗   ██████╗ ██╗    ██╗███████╗███████╗██████╗    ███╗   ███╗ ██████╗██████╗ [/#FFFCDA]")
+        lines.append("[#FFFCDA]██╔══██╗██╔══██╗ ██╔═══██╗██║    ██║██╔════╝██╔════╝██╔══██╗   ████╗ ████║██╔════╝██╔══██╗[/#FFFCDA]")
+        lines.append("[#E5D890]██████╔╝██████╔╝ ██║   ██║██║ █╗ ██║███████╗█████╗  ██████╔╝   ██╔████╔██║██║     ██████╔╝[/#E5D890]")
+        lines.append("[#E5D890]██╔══██╗██╔══██╗ ██║   ██║██║███╗██║╚════██║██╔══╝  ██╔══██╗   ██║╚██╔╝██║██║     ██║     [/#E5D890]")
+        lines.append("[#E5D890]██████╔╝██║  ██║ ╚██████╔╝╚███╔███╔╝███████║███████╗██║  ██║   ██║ ╚═╝ ██║╚██████╗██║     [/#E5D890]")
+        lines.append("[#E5D890]╚═════╝ ╚═╝  ╚═╝  ╚═════╝  ╚══╝╚══╝ ╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝     ╚═╝ ╚═════╝╚═╝     [/#E5D890]")
         self.update("\n".join(lines))
 
 
@@ -111,6 +118,127 @@ def load_config() -> dict:
         raise RuntimeError(
             f"config.toml is malformed: {e}. Please fix or re-run 'python installer.py'."
         )
+
+
+# Set by main() from the --mode CLI flag; None when not given.
+_CLI_MODE: Optional[str] = None
+
+
+def _validate_mode(value: str, source: str) -> str:
+    """Return the canonical mode for `value`, otherwise raise a clear error.
+
+    Valid modes: "browser", and "tui" (with "native" accepted as a legacy
+    alias that maps to "tui"). Anything else is rejected with an explicit
+    message listing the valid options.
+    """
+    if value == "browser":
+        return "browser"
+    if value in ("tui", "native"):
+        return "tui"
+    raise ValueError(
+        f"Invalid Tor Browser MCP mode: {value!r} (from {source}). "
+        "The only available modes are 'tui' and 'browser' "
+        "('native' is accepted as an alias for 'tui'). "
+        "Fix [server] mode in config.toml, or relaunch with --mode tui|browser."
+    )
+
+
+def resolve_mode() -> str:
+    """Resolve the session mode: CLI --mode > config [server] mode > default.
+
+    Resolution order: --mode CLI flag > config.toml [server] mode > default
+    "browser". Only "tui" and "browser" are valid modes ("native" is accepted
+    as a legacy alias for "tui"). Any other value raises a clear ValueError
+    listing the valid options.
+    """
+    if _CLI_MODE is not None:
+        return _validate_mode(_CLI_MODE, "the --mode CLI flag")
+    try:
+        cfg_mode = load_config().get("server", {}).get("mode")
+    except Exception:
+        # No/unreadable config.toml: startup fails later with a clearer
+        # message anyway; fall back to the default mode here.
+        return "browser"
+    if cfg_mode is None:
+        # Key absent -> default (config.toml often has no [server] mode set).
+        return "browser"
+    return _validate_mode(cfg_mode, "[server] mode in config.toml")
+
+
+def _param_bool(value, default: bool = False) -> bool:
+    """Coerce a socket/JSON parameter to bool."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _param_int(value, default: int = 0) -> int:
+    """Coerce a socket/JSON parameter to int."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _param_float(value, default: float = 0.0) -> float:
+    """Coerce a socket/JSON parameter to float."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _param_str(value) -> str:
+    """Coerce a socket/JSON parameter to str ('' for None)."""
+    return "" if value is None else str(value)
+
+
+# Deterministic element-ref stamping. Every located element gets a
+# data-onion-ref attribute ("e1", "e2", ...) the first time it is seen; the
+# counter lives on the page (window.__onionSeq) and dies with the document,
+# so refs are deterministic for a given page and invalidated by navigation.
+_STAMP_JS = """
+  const sel = arguments[0], by = arguments[1], limit = arguments[2], hidden = arguments[3];
+  window.__onionSeq = window.__onionSeq || 0;
+  let loc = [];
+  if (by === 'css') {
+    loc = Array.from(document.querySelectorAll(sel));
+  } else if (by === 'xpath') {
+    const r = document.evaluate(sel, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+    for (let i = 0; i < r.snapshotLength; i++) loc.push(r.snapshotItem(i));
+  } else if (by === 'id') {
+    const e = document.getElementById(sel);
+    if (e) loc.push(e);
+  } else if (by === 'link_text' || by === 'partial_link_text') {
+    const want = sel.trim();
+    loc = Array.from(document.querySelectorAll('a')).filter(function (a) {
+      const t = (a.textContent || '').trim();
+      return by === 'link_text' ? t === want : t.indexOf(want) !== -1;
+    });
+  }
+  const out = [];
+  for (const el of loc) {
+    if (!el || !el.tagName) continue;
+    if (!hidden && (el.offsetParent === null)) continue;
+    if (!el.hasAttribute('data-onion-ref')) {
+      window.__onionSeq += 1;
+      el.setAttribute('data-onion-ref', 'e' + window.__onionSeq);
+    }
+    out.push({
+      ref: el.getAttribute('data-onion-ref'),
+      tag: el.tagName.toLowerCase(),
+      text: (el.innerText || '').trim().slice(0, 80),
+      id: el.id || '',
+      name: el.name || '',
+      href: el.href || '',
+      visible: el.offsetParent !== null
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -850,7 +978,7 @@ class SessionDivider(Static):
 class TorSession:
     """Manages persistent Tor connection and browser."""
 
-    def __init__(self, operation_callback: Callable = None):
+    def __init__(self, operation_callback: Callable = None, mode: Optional[str] = None):
         self._tor_process = None
         self._pending_tor_process = None
         self._tor_socks_port: Optional[int] = None
@@ -876,6 +1004,12 @@ class TorSession:
         self._shutdown_event = threading.Event()
         self._stop_in_progress_event = threading.Event()
         self._startup_in_progress_event = threading.Event()
+        # Session mode: "browser" (default) or "tui" (text-only searches).
+        self._mode: str = mode or resolve_mode()
+        # True iff *we* started the virtual display (never stop a user's X).
+        self._browser_display_owned: bool = False
+        # Python-side element-ref fallback counter (JS-side is primary).
+        self._browser_element_seq: int = 0
 
     def request_shutdown(self) -> None:
         """Mark session as shutting down so new work can be rejected quickly."""
@@ -1456,6 +1590,8 @@ class TorSession:
                     self._current_circuit_countries = None
                     self._browser_driver = None
                     self._browser_ready = False
+                    self._browser_display_owned = False
+                    self._browser_element_seq = 0
                     self._tor_process = None
                     self._pending_tor_process = None
                     self._tor_socks_port = None
@@ -1478,6 +1614,8 @@ class TorSession:
                 virtual_display = self._virtual_display
                 add_tor_target(self._tor_process, self._tor_control_port)
                 add_tor_target(self._pending_tor_process, self._pending_tor_control_port)
+                self._browser_display_owned = False
+                self._browser_element_seq = 0
 
             if controller:
                 try:
@@ -1505,9 +1643,50 @@ class TorSession:
         finally:
             self._stop_in_progress_event.clear()
 
+    def _ensure_virtual_display(self) -> None:
+        """Headful browser needs an X display. Try Xvfb, fall back to Xephyr.
+
+        The display is assigned to self._virtual_display only after .start()
+        succeeds, so a failed attempt cannot poison later teardown.
+        """
+        if not self._needs_virtual_display() or self._virtual_display:
+            return
+        from pyvirtualdisplay import Display
+        last_err = None
+        for backend in ("xvfb", "xephyr"):  # pyvirtualdisplay auto-detects backends
+            try:
+                display = Display(visible=False, size=(1920, 1080), backend=backend)
+                display.start()  # sets os.environ["DISPLAY"], restored on stop()
+            except Exception as e:
+                last_err = e
+                continue
+            self._virtual_display = display
+            self._browser_display_owned = True
+            return
+        raise RuntimeError(
+            "No X display available for headful Tor Browser "
+            f"(install xvfb or xephyr): {last_err}"
+        )
+
     def warm_up_browser(self) -> tuple[bool, str, Optional[float]]:
         """
-        Initialize the persistent browser instance.
+        Initialize the persistent browser instance (acquires the session lock).
+        Returns: (success, message, duration_seconds)
+        """
+        if not self._lock.acquire(timeout=30.0):
+            if self._browser_driver:
+                return True, "Browser already warm", None
+            return False, "Browser busy (session lock not acquired within 30s)", None
+        try:
+            return self._warm_up_browser_locked()
+        finally:
+            self._lock.release()
+
+    def _warm_up_browser_locked(self) -> tuple[bool, str, Optional[float]]:
+        """Initialize the persistent browser instance.
+
+        Caller must already hold self._lock (the lock is non-reentrant, so
+        warm_up_browser() and browser_command() both funnel into this body).
         Returns: (success, message, duration_seconds)
         """
         if self.is_shutting_down():
@@ -1539,10 +1718,19 @@ class TorSession:
 
             tbb_logfile_path = "NUL" if _is_windows() else "/dev/null"
 
-            if self._needs_virtual_display() and not self._virtual_display:
-                from pyvirtualdisplay import Display
-                self._virtual_display = Display(visible=False, size=(1920, 1080))
-                self._virtual_display.start()
+            self._ensure_virtual_display()
+
+            if self._mode == "browser":
+                # tbselenium resolves geckodriver via shutil.which(); put the
+                # configured directory on PATH so geckodriver_path is honored.
+                gecko = str(config.get("browser", {}).get("geckodriver_path") or "")
+                if gecko:
+                    gecko_dir = gecko if os.path.isdir(gecko) else os.path.dirname(gecko)
+                    current_path = os.environ.get("PATH", "")
+                    if gecko_dir and gecko_dir not in current_path.split(os.pathsep):
+                        os.environ["PATH"] = (
+                            f"{gecko_dir}{os.pathsep}{current_path}" if current_path else gecko_dir
+                        )
 
             options = Options()
             options.page_load_strategy = "none"
@@ -1552,7 +1740,7 @@ class TorSession:
                 tor_cfg=USE_STEM,
                 tbb_logfile_path=tbb_logfile_path,
                 tor_data_dir=str(tor_data_dir.resolve()),
-                headless=True,
+                headless=(self._mode != "browser"),
                 options=options,
                 tbb_profile_path=self._tbb_profile_path,
                 socks_port=self._tor_socks_port,  # Use the actual port Tor is running on
@@ -1573,6 +1761,931 @@ class TorSession:
     def is_browser_ready(self) -> bool:
         """Check if browser is warmed up and ready."""
         return self._browser_ready and self._browser_driver is not None
+
+    # ------------------------------------------------------------------
+    # Browser automation (browser mode) — see .opencode/BROWSER_MODE.md
+    #
+    # Contract: browser_command() acquires self._lock EXACTLY ONCE and calls
+    # the _browser_* internals below, which never acquire it (the lock is
+    # non-reentrant). Every action returns {"success": True, ...payload} or
+    # {"success": False, "error": "..."}.
+    # ------------------------------------------------------------------
+
+    _BROWSER_ACTIONS = frozenset({
+        "status", "navigate", "click", "fill", "keys", "execute_js", "get_text",
+        "get_html", "get_url", "get_title", "find", "get_attribute", "screenshot",
+        "back", "forward", "refresh", "scroll", "new_tab", "switch_tab",
+        "close_tab", "wait_ready", "close",
+    })
+
+    # Actions that read or manipulate the page: they wait for a navigation we
+    # started (e.g. browser_navigate(wait=False)) to commit before running, so
+    # they cannot race the still-loading document.
+    _SETTLE_ACTIONS = frozenset({
+        "click", "fill", "keys", "execute_js", "get_text", "get_html",
+        "get_url", "get_title", "find", "get_attribute", "screenshot", "scroll",
+    })
+
+    _KEY_ALIASES = {
+        "CTRL": "CONTROL",
+        "CMD": "COMMAND",
+        "COMMANDKEY": "COMMAND",
+        "PAGEUP": "PAGE_UP",
+        "PAGEDOWN": "PAGE_DOWN",
+        "ESC": "ESCAPE",
+        "DEL": "DELETE",
+        "INS": "INSERT",
+        "SPACEBAR": "SPACE",
+        "RETURN": "ENTER",
+        "ARROWUP": "UP",
+        "ARROWDOWN": "DOWN",
+        "ARROWLEFT": "LEFT",
+        "ARROWRIGHT": "RIGHT",
+    }
+
+    # Keys that must remain held while the rest of the combo is typed.
+    _MODIFIER_KEYS = frozenset({
+        Keys.CONTROL, Keys.SHIFT, Keys.ALT, Keys.COMMAND, Keys.META,
+    })
+
+    def browser_command(self, action: str, params: dict) -> dict:
+        """Run one browser automation action while holding the session lock.
+
+        Acquires self._lock exactly once (timeout 30s) so browser commands
+        serialize with search/fetch_pages/stop_tor; the internal _browser_*
+        helpers are only ever called from here (or from code already holding
+        the lock) and never re-acquire it.
+        """
+        params = params if isinstance(params, dict) else {}
+        action = str(action or "").strip()
+        if action not in self._BROWSER_ACTIONS:
+            return {"success": False, "error": f"Unknown browser action: {action}"}
+
+        # status must stay answerable even if Tor died (reports tor_running honestly)
+        if action != "status" and not self.is_running():
+            return {"success": False, "error": "Tor not running"}
+
+        if not self._lock.acquire(timeout=30.0):
+            return {
+                "success": False,
+                "error": "Browser busy (another command holds the session lock)",
+            }
+        try:
+            if self.is_shutting_down():
+                return {"success": False, "error": "Session is shutting down"}
+
+            # These two never need a live driver.
+            if action == "status":
+                return self._browser_status()
+            if action == "close":
+                return self._browser_close()
+
+            # Everything else drives the Tor Browser: warm it up on demand.
+            ok, message, _ = self._warm_up_browser_locked()
+            if not ok:
+                return {"success": False, "error": message}
+
+            # Do not race an in-flight navigation (navigate(wait=False)).
+            if action in self._SETTLE_ACTIONS:
+                self._settle_pending_navigation()
+
+            if action == "navigate":
+                return self._browser_navigate(
+                    _param_str(params.get("url")),
+                    _param_bool(params.get("wait"), True),
+                    _param_float(params.get("wait_timeout"), 0.0),
+                )
+            if action == "click":
+                return self._browser_click(
+                    _param_str(params.get("ref")),
+                    _param_bool(params.get("wait"), False),
+                )
+            if action == "fill":
+                return self._browser_fill(
+                    _param_str(params.get("ref")),
+                    _param_str(params.get("text")),
+                    _param_bool(params.get("clear"), True),
+                    _param_bool(params.get("submit"), False),
+                )
+            if action == "keys":
+                return self._browser_keys(
+                    _param_str(params.get("keys")),
+                    _param_str(params.get("ref")),
+                )
+            if action == "execute_js":
+                return self._browser_execute_js(
+                    _param_str(params.get("script")),
+                    params.get("args"),
+                )
+            if action == "get_text":
+                return self._browser_get_text(
+                    _param_str(params.get("ref")),
+                    _param_int(params.get("max_chars"), 0),
+                )
+            if action == "get_html":
+                return self._browser_get_html(
+                    _param_str(params.get("ref")),
+                    _param_int(params.get("max_chars"), 0),
+                )
+            if action == "get_url":
+                return self._browser_get_url()
+            if action == "get_title":
+                return self._browser_get_title()
+            if action == "find":
+                return self._browser_find(
+                    _param_str(params.get("selector")),
+                    _param_str(params.get("by")) or "css",
+                    _param_int(params.get("limit"), 10),
+                    _param_bool(params.get("include_hidden"), False),
+                )
+            if action == "get_attribute":
+                return self._browser_get_attribute(
+                    _param_str(params.get("ref")),
+                    _param_str(params.get("attribute")),
+                )
+            if action == "screenshot":
+                return self._browser_screenshot()
+            if action == "back":
+                return self._browser_back(_param_bool(params.get("wait"), True))
+            if action == "forward":
+                return self._browser_forward(_param_bool(params.get("wait"), True))
+            if action == "refresh":
+                return self._browser_refresh(_param_bool(params.get("wait"), True))
+            if action == "scroll":
+                return self._browser_scroll(
+                    _param_str(params.get("direction")) or "down",
+                    _param_int(params.get("amount_px"), 800),
+                    _param_str(params.get("ref")),
+                )
+            if action == "new_tab":
+                return self._browser_new_tab(_param_str(params.get("url")))
+            if action == "switch_tab":
+                return self._browser_switch_tab(
+                    _param_str(params.get("handle")),
+                    _param_int(params.get("index"), -1),
+                )
+            if action == "close_tab":
+                return self._browser_close_tab(_param_str(params.get("handle")))
+            if action == "wait_ready":
+                return self._browser_wait_ready(
+                    _param_float(params.get("timeout"), 0.0),
+                    _param_str(params.get("selector")),
+                )
+            return {"success": False, "error": f"Unknown browser action: {action}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+        finally:
+            self._lock.release()
+
+    # -- shared helpers (all assume self._lock is held) ------------------
+
+    def _get_browser_cfg(self) -> dict:
+        try:
+            cfg = load_config().get("browser", {})
+            return cfg if isinstance(cfg, dict) else {}
+        except Exception:
+            return {}
+
+    def _get_wait_timeout_default(self) -> float:
+        """Default wait budget from config [browser] wait_timeout_seconds."""
+        try:
+            value = float(self._get_browser_cfg().get("wait_timeout_seconds", 30))
+        except (TypeError, ValueError):
+            value = 30.0
+        return value if value > 0 else 30.0
+
+    def _get_max_output_chars(self) -> int:
+        """Output cap from config [browser] max_output_chars."""
+        try:
+            value = int(self._get_browser_cfg().get("max_output_chars", 100000))
+        except (TypeError, ValueError):
+            value = 100000
+        return value if value > 0 else 100000
+
+    def _truncate(self, text: str, max_chars: int = 0) -> tuple[str, bool]:
+        """Cap text at max_chars (0 = config max_output_chars); flag truncation."""
+        limit = int(max_chars) if max_chars and max_chars > 0 else self._get_max_output_chars()
+        if limit <= 0 or len(text) <= limit:
+            return text, False
+        return text[:limit] + "\n…[truncated]", True
+
+    def _mark_document(self) -> None:
+        """Tag the outgoing document so a later poll can tell when it is gone.
+
+        With page_load_strategy="none" driver.get()/back()/click() return before
+        the new document commits, so readyState (and current_url) still describe
+        the *previous* page for a while. The mark lives on the outgoing window,
+        so it disappears exactly when the new document has committed.
+        """
+        try:
+            self._browser_driver.execute_script("window.__onionMark = true;")
+        except Exception:
+            pass
+
+    def _document_is_marked(self) -> bool:
+        """True while the marked (outgoing) document is still the current one."""
+        try:
+            return bool(self._browser_driver.execute_script(
+                "return !!window.__onionMark;"))
+        except Exception:
+            return False
+
+    def _clear_document_mark(self) -> None:
+        """Drop a stale mark (navigation never produced a new document)."""
+        try:
+            self._browser_driver.execute_script(
+                "try { delete window.__onionMark; } catch (e) "
+                "{ window.__onionMark = false; }")
+        except Exception:
+            pass
+
+    def _settle_pending_navigation(self) -> None:
+        """Block until an in-flight navigation we started has committed.
+
+        Bounded by [browser] wait_timeout_seconds; a mark that never clears
+        (a navigation that produced no new document) is dropped at the deadline
+        so later commands are not slowed down repeatedly.
+        """
+        if self._browser_driver is None or not self._document_is_marked():
+            return
+        budget = self._get_wait_timeout_default()
+        self._wait_ready_locked(
+            budget, require_new_doc=True, new_doc_grace=budget)
+
+    def _wait_ready_locked(
+        self,
+        timeout: float,
+        require_new_doc: bool = True,
+        new_doc_grace: float = 0.0,
+    ) -> str:
+        """Poll until the (new) document reports readyState "complete".
+
+        Callers must call _mark_document() before starting a navigation; this
+        then waits for the mark to disappear (i.e. for the new document to
+        commit) before trusting readyState - otherwise the previous document
+        reports "complete" immediately and callers race the loading page.
+
+        new_doc_grace > 0 gives up on seeing a new document after that many
+        seconds (used by browser_click, where most clicks do not navigate) and
+        clears the mark; 0 waits the whole budget.
+        """
+        budget = _param_float(timeout, 0.0)
+        if budget <= 0:
+            budget = self._get_wait_timeout_default()
+        start = time.time()
+        deadline = start + budget
+        driver = self._browser_driver
+        state = ""
+        while True:
+            now = time.time()
+            if now >= deadline:
+                break
+            if require_new_doc and self._document_is_marked():
+                if new_doc_grace > 0 and (now - start) >= new_doc_grace:
+                    # No new document within the grace window: the action
+                    # probably did not navigate. Stop waiting on the mark.
+                    self._clear_document_mark()
+                else:
+                    time.sleep(0.1)
+                    continue
+            try:
+                state = str(driver.execute_script("return document.readyState;") or "")
+            except Exception as e:
+                state = f"error: {e}"
+                break
+            if state == "complete":
+                break
+            time.sleep(0.1)
+        return state
+
+    @staticmethod
+    def _normalize_browser_url(url: str) -> str:
+        """Ensure an absolute navigable URL (adds https:// when no scheme)."""
+        url = (url or "").strip()
+        if not url:
+            return url
+        parsed = urllib.parse.urlparse(url)
+        if not parsed.scheme or (
+            "://" not in url
+            and parsed.scheme not in ("about", "data", "file", "javascript")
+        ):
+            # urlparse("example.com") -> scheme ""; urlparse("localhost:8080")
+            # -> scheme "localhost", which is not a URL scheme carrying "://".
+            url = "https://" + url
+        return url
+
+    def _python_stamp_ref(self, element) -> str:
+        """Fallback ref allocation when JS stamping is unavailable."""
+        ref = element.get_attribute("data-onion-ref")
+        if ref:
+            return ref
+        try:
+            seq = int(self._browser_driver.execute_script(
+                "return window.__onionSeq || 0;") or 0)
+            if seq > self._browser_element_seq:
+                self._browser_element_seq = seq
+        except Exception:
+            pass
+        self._browser_element_seq += 1
+        ref = f"e{self._browser_element_seq}"
+        try:
+            # Keep the JS counter in sync so later JS stamps cannot collide.
+            # The attribute MUST carry the exact string we return: _by_ref()
+            # looks elements up by [data-onion-ref="<ref>"], so stamping the
+            # bare counter (an int) here made every execute_js ref unusable.
+            self._browser_driver.execute_script(
+                "window.__onionSeq = Math.max(window.__onionSeq || 0, arguments[1]);"
+                "arguments[0].setAttribute('data-onion-ref', arguments[2]);",
+                element,
+                self._browser_element_seq,
+                ref,
+            )
+        except Exception:
+            pass
+        return ref
+
+    def _by_ref(self, ref: str):
+        """Locate a stamped element by its ref. Caller must hold self._lock."""
+        if not ref:
+            raise RuntimeError("Element ref is required")
+        element = None
+        try:
+            element = self._browser_driver.find_element(
+                By.CSS_SELECTOR, f'[data-onion-ref="{ref}"]'
+            )
+        except Exception:
+            element = None
+        if element is None:
+            raise RuntimeError(
+                f"Unknown element ref '{ref}'; the page changed - call browser_find again"
+            )
+        return element
+
+    def _normalize_js_value(self, value):
+        """JSON-normalize a script result (WebElements become element refs)."""
+        if isinstance(value, WebElement):
+            try:
+                return {"ref": self._python_stamp_ref(value)}
+            except Exception:
+                try:
+                    return str(value)
+                except Exception:
+                    return "<element>"
+        if isinstance(value, dict):
+            return {str(k): self._normalize_js_value(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._normalize_js_value(v) for v in value]
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        return str(value)
+
+    # -- browser actions (all assume self._lock is held) -----------------
+
+    def _browser_status(self) -> dict:
+        """Report session/browser state without launching anything."""
+        driver = self._browser_driver
+        handles: list[dict] = []
+        active_handle = ""
+        window_count = 0
+        current_url = ""
+        title = ""
+        if driver is not None:
+            try:
+                window_count = len(driver.window_handles)
+            except Exception:
+                window_count = 0
+            try:
+                active_handle = driver.current_window_handle
+            except Exception:
+                active_handle = ""
+            try:
+                current_url = driver.current_url or ""
+                title = driver.title or ""
+            except Exception:
+                pass
+            for handle in list(driver.window_handles):
+                info = {"handle": handle, "url": "", "title": ""}
+                if handle == active_handle:
+                    info["url"] = current_url
+                    info["title"] = title
+                else:
+                    try:
+                        driver.switch_to.window(handle)
+                        info["url"] = driver.current_url or ""
+                        info["title"] = driver.title or ""
+                    except Exception:
+                        pass
+                handles.append(info)
+            if active_handle:
+                try:
+                    driver.switch_to.window(active_handle)
+                except Exception:
+                    pass
+        display_number = None
+        match = re.search(r":(\d+)", os.environ.get("DISPLAY", "") or "")
+        if match:
+            display_number = int(match.group(1))
+        return {
+            "success": True,
+            "mode": self._mode,
+            "tor_running": self.is_running(),
+            "browser_ready": self.is_browser_ready(),
+            "headless": self._mode != "browser",
+            "current_url": current_url,
+            "title": title,
+            "window_count": window_count,
+            "active_handle": active_handle,
+            "handles": handles,
+            "display": {"virtual": self._virtual_display is not None, "number": display_number},
+            "uptime_s": self.get_uptime(),
+        }
+
+    def _browser_navigate(self, url: str, wait: bool = True, wait_timeout: float = 0.0) -> dict:
+        if not url.strip():
+            return {"success": False, "error": "url is required"}
+        target = self._normalize_browser_url(url)
+        driver = self._browser_driver
+        start = time.time()
+        self._mark_document()
+        try:
+            driver.get(target)
+        except Exception as e:
+            return {"success": False, "error": f"Navigation failed: {e}"}
+        state = "skipped"
+        if wait:
+            state = self._wait_ready_locked(
+                wait_timeout or self._get_wait_timeout_default(),
+                require_new_doc=True,
+                new_doc_grace=0.0,
+            )
+        # New document: element refs from the previous page are dead.
+        self._browser_element_seq = 0
+        try:
+            final_url = driver.current_url or target
+            page_title = driver.title or ""
+        except Exception:
+            final_url, page_title = target, ""
+        return {
+            "success": True,
+            "url": final_url,
+            "title": page_title,
+            "ready_state": state,
+            "elapsed_s": round(time.time() - start, 3),
+        }
+
+    def _browser_click(self, ref: str, wait: bool = False) -> dict:
+        try:
+            element = self._by_ref(ref)
+            if wait:
+                self._mark_document()
+            element.click()
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Click failed: {e}"}
+        if wait:
+            # Most clicks do not navigate, so only wait a few seconds for a new
+            # document to commit before falling back to the current page state.
+            self._wait_ready_locked(
+                self._get_wait_timeout_default(),
+                require_new_doc=True,
+                new_doc_grace=3.0,
+            )
+        return {"success": True, "clicked": ref, "url": self._browser_driver.current_url or ""}
+
+    def _browser_fill(self, ref: str, text: str, clear: bool = True, submit: bool = False) -> dict:
+        try:
+            element = self._by_ref(ref)
+            if clear:
+                try:
+                    element.clear()
+                except Exception:
+                    pass
+            element.send_keys(text)
+            submitted = False
+            if submit:
+                element.send_keys(Keys.ENTER)
+                submitted = True
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Fill failed: {e}"}
+        return {
+            "success": True,
+            "filled": ref,
+            "submitted": submitted,
+            "url": self._browser_driver.current_url or "",
+        }
+
+    def _browser_keys(self, keys: str, ref: str = "") -> dict:
+        if not keys.strip():
+            return {"success": False, "error": "keys is required"}
+        try:
+            combo = []
+            for token in keys.split("+"):
+                token = token.strip()
+                if not token:
+                    continue
+                name = token.upper()
+                name = self._KEY_ALIASES.get(name, name)
+                value = getattr(Keys, name, None)
+                if value is None:
+                    if len(token) == 1:
+                        value = token  # literal character
+                    else:
+                        return {"success": False, "error": f"Unknown key: {token}"}
+                combo.append(value)
+            if not combo:
+                return {"success": False, "error": "keys is required"}
+            # Selenium's ActionChains.send_keys() presses AND releases every
+            # key, so a combo like CTRL+A would type a plain "A". Hold the
+            # modifiers down explicitly, type the rest, then release them.
+            modifiers = [k for k in combo if k in self._MODIFIER_KEYS]
+            others = [k for k in combo if k not in self._MODIFIER_KEYS]
+            chain = ActionChains(self._browser_driver)
+            if ref:
+                chain = chain.move_to_element(self._by_ref(ref))
+            for mod in modifiers:
+                chain = chain.key_down(mod)
+            if others:
+                chain = chain.send_keys(*others)
+            for mod in reversed(modifiers):
+                chain = chain.key_up(mod)
+            chain.perform()
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Key send failed: {e}"}
+        return {"success": True, "sent": keys, "url": self._browser_driver.current_url or ""}
+
+    def _browser_execute_js(self, script: str, args=None) -> dict:
+        if not script.strip():
+            return {"success": False, "error": "script is required"}
+        if args is None:
+            args = []
+        if not isinstance(args, list):
+            return {"success": False, "error": "args must be a JSON array"}
+        try:
+            result = self._browser_driver.execute_script(script, *args)
+        except Exception as e:
+            return {"success": False, "error": f"Script failed: {e}"}
+        normalized = self._normalize_js_value(result)
+        raw = json.dumps(normalized, ensure_ascii=False, default=str)
+        capped, truncated = self._truncate(raw)
+        return {"success": True, "result": capped, "truncated": truncated}
+
+    def _browser_get_text(self, ref: str = "", max_chars: int = 0) -> dict:
+        try:
+            if ref:
+                text = self._by_ref(ref).text or ""
+            else:
+                text = self._browser_driver.execute_script(
+                    "return document.body ? (document.body.innerText || '') : '';"
+                ) or ""
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"get_text failed: {e}"}
+        capped, _ = self._truncate(str(text), max_chars)
+        return {"success": True, "text": capped}
+
+    def _browser_get_html(self, ref: str = "", max_chars: int = 0) -> dict:
+        try:
+            if ref:
+                html = self._by_ref(ref).get_attribute("outerHTML") or ""
+            else:
+                html = self._browser_driver.page_source or ""
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"get_html failed: {e}"}
+        capped, _ = self._truncate(str(html), max_chars)
+        return {"success": True, "html": capped}
+
+    def _browser_get_url(self) -> dict:
+        try:
+            url = self._browser_driver.current_url or ""
+        except Exception as e:
+            return {"success": False, "error": f"get_url failed: {e}"}
+        return {"success": True, "url": url}
+
+    def _browser_get_title(self) -> dict:
+        try:
+            title = self._browser_driver.title or ""
+        except Exception as e:
+            return {"success": False, "error": f"get_title failed: {e}"}
+        return {"success": True, "title": title}
+
+    def _browser_find(
+        self,
+        selector: str,
+        by: str = "css",
+        limit: int = 10,
+        include_hidden: bool = False,
+    ) -> dict:
+        if not selector.strip():
+            return {"success": False, "error": "selector is required"}
+        by = (by or "css").strip().lower()
+        if by not in ("css", "xpath", "id", "link_text", "partial_link_text"):
+            return {"success": False, "error": f"Unsupported by: {by}"}
+        limit = _param_int(limit, 10)
+        limit = max(1, min(limit, 500))
+        driver = self._browser_driver
+        items = None
+        try:
+            items = driver.execute_script(
+                _STAMP_JS, selector, by, limit, bool(include_hidden)
+            )
+        except Exception:
+            items = None
+        if items is None:
+            # Python-side fallback: locate via selenium and stamp refs ourselves.
+            try:
+                by_map = {
+                    "css": By.CSS_SELECTOR,
+                    "xpath": By.XPATH,
+                    "id": By.ID,
+                    "link_text": By.LINK_TEXT,
+                    "partial_link_text": By.PARTIAL_LINK_TEXT,
+                }
+                elements = driver.find_elements(by_map[by], selector)
+            except Exception as e:
+                return {"success": False, "error": f"find failed: {e}"}
+            items = []
+            for element in elements:
+                if len(items) >= limit:
+                    break
+                try:
+                    visible = bool(element.is_displayed())
+                except Exception:
+                    visible = False
+                if not include_hidden and not visible:
+                    continue
+                try:
+                    items.append({
+                        "ref": self._python_stamp_ref(element),
+                        "tag": (element.tag_name or "").lower(),
+                        "text": (element.text or "").strip()[:80],
+                        "id": element.get_attribute("id") or "",
+                        "name": element.get_attribute("name") or "",
+                        "href": element.get_attribute("href") or "",
+                        "visible": visible,
+                    })
+                except Exception:
+                    continue
+        else:
+            # Keep the Python-side fallback counter in sync with the JS one.
+            try:
+                seq = int(driver.execute_script("return window.__onionSeq || 0;") or 0)
+                if seq > self._browser_element_seq:
+                    self._browser_element_seq = seq
+            except Exception:
+                pass
+        return {"success": True, "results": items, "count": len(items)}
+
+    def _browser_get_attribute(self, ref: str, attribute: str) -> dict:
+        if not attribute.strip():
+            return {"success": False, "error": "attribute is required"}
+        try:
+            element = self._by_ref(ref)
+            if attribute == "text":
+                value = element.text
+            elif attribute == "html":
+                value = element.get_attribute("outerHTML")
+            else:
+                value = element.get_attribute(attribute)
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"get_attribute failed: {e}"}
+        return {"success": True, "value": value if value is not None else ""}
+
+    def _browser_screenshot(self) -> dict:
+        try:
+            png = self._browser_driver.get_screenshot_as_png()
+        except Exception as e:
+            return {"success": False, "error": f"Screenshot failed: {e}"}
+        encoded = base64.b64encode(png).decode("ascii")
+        return {"success": True, "mime": "image/png", "base64": encoded, "bytes": len(png)}
+
+    def _run_history_op(self, op: str, wait: bool) -> dict:
+        driver = self._browser_driver
+        try:
+            if wait:
+                self._mark_document()
+            getattr(driver, op)()
+            state = (
+                self._wait_ready_locked(
+                    self._get_wait_timeout_default(),
+                    require_new_doc=True,
+                    # back()/forward() are no-ops when there is no such history
+                    # entry; bail after a few seconds instead of burning the
+                    # whole budget when nothing was loaded.
+                    new_doc_grace=5.0,
+                )
+                if wait
+                else "skipped"
+            )
+        except Exception as e:
+            return {"success": False, "error": f"{op} failed: {e}"}
+        # New/reloaded document: element refs from the old page are dead.
+        self._browser_element_seq = 0
+        try:
+            url = driver.current_url or ""
+            title = driver.title or ""
+        except Exception:
+            url, title = "", ""
+        return {"success": True, "url": url, "title": title, "ready_state": state}
+
+    def _browser_back(self, wait: bool = True) -> dict:
+        return self._run_history_op("back", wait)
+
+    def _browser_forward(self, wait: bool = True) -> dict:
+        return self._run_history_op("forward", wait)
+
+    def _browser_refresh(self, wait: bool = True) -> dict:
+        return self._run_history_op("refresh", wait)
+
+    def _browser_scroll(self, direction: str = "down", amount_px: int = 800, ref: str = "") -> dict:
+        direction = direction.strip().lower()
+        if direction not in ("down", "up", "top", "bottom"):
+            return {"success": False, "error": f"Unsupported direction: {direction}"}
+        amount_px = _param_int(amount_px, 800)
+        driver = self._browser_driver
+        try:
+            if ref:
+                element = self._by_ref(ref)
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+            elif direction == "down":
+                driver.execute_script("window.scrollBy(0, arguments[0]);", amount_px)
+            elif direction == "up":
+                driver.execute_script("window.scrollBy(0, -arguments[0]);", amount_px)
+            elif direction == "top":
+                driver.execute_script("window.scrollTo(0, 0);")
+            else:  # bottom
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            coords = driver.execute_script(
+                "return [window.scrollX || window.pageXOffset || 0,"
+                " window.scrollY || window.pageYOffset || 0];"
+            ) or [0, 0]
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"Scroll failed: {e}"}
+        return {"success": True, "scroll_x": int(coords[0]), "scroll_y": int(coords[1])}
+
+    def _browser_new_tab(self, url: str = "") -> dict:
+        driver = self._browser_driver
+        try:
+            driver.switch_to.new_window("tab")
+            handle = driver.current_window_handle
+        except Exception as e:
+            return {"success": False, "error": f"new_tab failed: {e}"}
+        if url.strip():
+            target = self._normalize_browser_url(url)
+            try:
+                self._mark_document()
+                driver.get(target)
+                self._wait_ready_locked(
+                    self._get_wait_timeout_default(),
+                    require_new_doc=True,
+                    new_doc_grace=0.0,
+                )
+                self._browser_element_seq = 0
+            except Exception as e:
+                return {"success": False, "error": f"new_tab navigation failed: {e}"}
+        try:
+            current_url = driver.current_url or ""
+            window_count = len(driver.window_handles)
+        except Exception:
+            current_url, window_count = "", 0
+        return {
+            "success": True,
+            "handle": handle,
+            "url": current_url,
+            "window_count": window_count,
+        }
+
+    def _browser_switch_tab(self, handle: str = "", index: int = -1) -> dict:
+        driver = self._browser_driver
+        try:
+            handles = list(driver.window_handles)
+        except Exception as e:
+            return {"success": False, "error": f"switch_tab failed: {e}"}
+        if handle:
+            if handle not in handles:
+                return {"success": False, "error": f"Unknown window handle: {handle}"}
+            target = handle
+        else:
+            idx = _param_int(index, -1)
+            if idx < 0 or idx >= len(handles):
+                return {
+                    "success": False,
+                    "error": f"index out of range: {index} (window_count={len(handles)})",
+                }
+            target = handles[idx]
+        try:
+            driver.switch_to.window(target)
+            url = driver.current_url or ""
+            title = driver.title or ""
+        except Exception as e:
+            return {"success": False, "error": f"switch_tab failed: {e}"}
+        return {
+            "success": True,
+            "handle": target,
+            "url": url,
+            "title": title,
+            "window_count": len(handles),
+        }
+
+    def _browser_close_tab(self, handle: str = "") -> dict:
+        driver = self._browser_driver
+        try:
+            handles = list(driver.window_handles)
+            original = driver.current_window_handle
+        except Exception as e:
+            return {"success": False, "error": f"close_tab failed: {e}"}
+        target = handle or original
+        if target not in handles:
+            return {"success": False, "error": f"Unknown window handle: {target}"}
+        if len(handles) <= 1:
+            return {
+                "success": False,
+                "error": "Refusing to close the last tab; use browser_close instead.",
+            }
+        try:
+            driver.switch_to.window(target)
+            driver.close()
+        except Exception as e:
+            return {"success": False, "error": f"close_tab failed: {e}"}
+        remaining: list = []
+        try:
+            remaining = list(driver.window_handles)
+        except Exception:
+            pass
+        fallback = original if original in remaining else (remaining[0] if remaining else None)
+        if fallback:
+            try:
+                driver.switch_to.window(fallback)
+            except Exception:
+                pass
+        return {"success": True, "closed": target, "remaining": len(remaining)}
+
+    def _browser_wait_ready(self, timeout: float = 0.0, selector: str = "") -> dict:
+        budget = _param_float(timeout, 0.0)
+        if budget <= 0:
+            budget = self._get_wait_timeout_default()
+        start = time.time()
+        # A mark on the current document means a navigation we started is still
+        # in flight (e.g. browser_navigate(wait=False)) - wait for it to commit
+        # before trusting readyState; a stale mark self-heals after the budget.
+        state = self._wait_ready_locked(
+            budget, require_new_doc=True, new_doc_grace=budget)
+        try:
+            url = self._browser_driver.current_url or ""
+        except Exception:
+            url = ""
+        waited = round(time.time() - start, 3)
+        if selector.strip():
+            remaining = max(0.5, budget - waited)
+            try:
+                WebDriverWait(self._browser_driver, remaining).until(
+                    lambda d: len(d.find_elements(By.CSS_SELECTOR, selector)) > 0
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "error": f"Selector not found within {remaining:.1f}s: {selector}",
+                    "ready_state": state,
+                    "url": url,
+                    "waited_s": waited,
+                }
+        return {"success": True, "ready_state": state, "url": url, "waited_s": waited}
+
+    def _browser_close(self) -> dict:
+        """Quit the browser (and the display we started); Tor stays up."""
+        driver = self._browser_driver
+        display = self._virtual_display if self._browser_display_owned else None
+        self._browser_driver = None
+        self._browser_ready = False
+        self._virtual_display = None if self._browser_display_owned else self._virtual_display
+        self._browser_display_owned = False
+        self._browser_element_seq = 0
+        warnings = []
+        if driver:
+            try:
+                driver.quit()
+            except Exception as e:
+                warnings.append(f"driver.quit: {e}")
+        if display:
+            try:
+                display.stop()
+            except Exception as e:
+                warnings.append(f"display.stop: {e}")
+        payload = {"success": True, "closed": True}
+        if warnings:
+            payload["warnings"] = warnings
+        return payload
 
     def is_running(self) -> bool:
         """Check if Tor is running."""
@@ -2111,7 +3224,10 @@ class TorSession:
             return results
 
         if not self._browser_driver:
-            success, msg, _ = self.warm_up_browser()
+            # _fetch_urls_with_browser runs while the caller (fetch_pages /
+            # fetch_specific_page) already holds self._lock, so use the
+            # non-locking warm-up entry point.
+            success, msg, _ = self._warm_up_browser_locked()
             if not success:
                 for url in urls:
                     results[url] = {"error": "browser_error", "message": msg}
@@ -2159,15 +3275,19 @@ class TorSession:
                 else:
                     results[url] = content
 
-            # Reset browser to clean state
-            try:
-                while len(driver.window_handles) > 1:
-                    driver.switch_to.window(driver.window_handles[-1])
-                    driver.close()
-                driver.switch_to.window(driver.window_handles[0])
-                driver.get("about:blank")
-            except Exception:
-                pass
+            # Reset browser to clean state. In browser mode the agent's tabs
+            # and session must survive, so skip the close-all + about:blank
+            # reset; _process_batch already closed the tabs it opened and
+            # restored the agent's original window handle.
+            if self._mode != "browser":
+                try:
+                    while len(driver.window_handles) > 1:
+                        driver.switch_to.window(driver.window_handles[-1])
+                        driver.close()
+                    driver.switch_to.window(driver.window_handles[0])
+                    driver.get("about:blank")
+                except Exception:
+                    pass
 
         except Exception as e:
             for url in urls:
@@ -2182,13 +3302,50 @@ class TorSession:
         tab_url_map = {}
         tab_dispatch_times = {}
 
+        browser_mode = self._mode == "browser"
+        original_handle = None
+        batch_opened: list = []  # browser mode: handles this batch opened
+        if browser_mode:
+            # Remember the agent's pre-existing tab: in browser mode it must
+            # never be navigated, closed, or left unfocused.
+            try:
+                original_handle = driver.current_window_handle
+            except Exception:
+                original_handle = None
+
         # Dispatch
         for i, url in enumerate(urls):
             if self.is_shutting_down():
                 break
 
-            if i == 0:
+            if i == 0 and not browser_mode:
                 handle = driver.current_window_handle
+            elif browser_mode:
+                # Browser mode: every URL (including the first) gets its own
+                # tab so the agent's original handle stays untouched.
+                handle = None
+                if original_handle is not None:
+                    try:
+                        driver.execute_script("window.open('');")
+                        candidate = driver.window_handles[-1]
+                        if candidate != original_handle:
+                            driver.switch_to.window(candidate)
+                            handle = candidate
+                            batch_opened.append(handle)
+                    except Exception:
+                        handle = None
+                if handle is None:
+                    # Fallback (popup blocked / no original handle): reuse the
+                    # current tab. That tab must then never be closed below.
+                    handle = (
+                        original_handle
+                        if original_handle is not None
+                        else driver.current_window_handle
+                    )
+                    try:
+                        driver.switch_to.window(handle)
+                    except Exception:
+                        pass
             else:
                 driver.execute_script("window.open('');")
                 handle = driver.window_handles[-1]
@@ -2275,7 +3432,11 @@ class TorSession:
                             progress_callback("fetch_error", url, str(e))
 
                     try:
-                        if len(driver.window_handles) > 1:
+                        # Browser mode: the agent's original tab is never
+                        # closed, even if it had to be reused for dispatch.
+                        if len(driver.window_handles) > 1 and not (
+                            browser_mode and handle == original_handle
+                        ):
                             driver.close()
                     except Exception:
                         pass
@@ -2307,7 +3468,9 @@ class TorSession:
                         progress_callback("fetch_error", url, "Timeout")
 
                 try:
-                    if len(driver.window_handles) > 1:
+                    if len(driver.window_handles) > 1 and not (
+                        browser_mode and handle == original_handle
+                    ):
                         driver.close()
                 except Exception:
                     pass
@@ -2316,6 +3479,31 @@ class TorSession:
                 results[url] = {"error": "timeout", "message": f"Tab error: {e}"}
                 if progress_callback:
                     progress_callback("fetch_error", url, str(e))
+
+        if browser_mode:
+            # Close only the handles this batch opened, then hand focus back
+            # to the agent's original tab (which was never navigated).
+            try:
+                for open_handle in batch_opened:
+                    if open_handle in driver.window_handles:
+                        try:
+                            driver.switch_to.window(open_handle)
+                            driver.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            try:
+                handles = list(driver.window_handles)
+                target = (
+                    original_handle
+                    if original_handle in handles
+                    else (handles[0] if handles else None)
+                )
+                if target:
+                    driver.switch_to.window(target)
+            except Exception:
+                pass
 
         return results
 
@@ -2476,6 +3664,7 @@ class TuiSocketServer:
                 "exit_ip": self.tor_session.get_exit_ip(),
                 "uptime": self.tor_session.get_uptime(),
                 "shutting_down": self.tor_session.is_shutting_down(),
+                "mode": getattr(self.tor_session, "_mode", "tui"),
             }
 
         if self.tor_session.is_shutting_down():
@@ -2694,6 +3883,22 @@ class TuiSocketServer:
                 )
 
             return result
+
+        elif command and command.startswith("browser_"):
+            action = command[len("browser_"):]
+            try:
+                if getattr(self.app, "log_browser_action", None):
+                    detail = (
+                        request.get("url")
+                        or request.get("ref")
+                        or request.get("selector")
+                        or request.get("keys")
+                        or ""
+                    )
+                    self.app.call_from_thread(self.app.log_browser_action, action, str(detail))
+            except Exception:
+                pass
+            return self.tor_session.browser_command(action, request)
 
         else:
             return {"success": False, "error": f"Unknown command: {command}"}
@@ -3170,6 +4375,15 @@ class OnionSearchTUI(App):
             self._fetch_sub_item_map = {}
             self._fetch_link_map = {}
 
+    def log_browser_action(self, action: str, detail: str = "") -> None:
+        """Best-effort status note for a browser automation action."""
+        message = f"Browser: {action} {detail}".rstrip()
+        logger.info(message)
+        try:
+            self.sub_title = message
+        except Exception:
+            pass
+
     def _start_session(self) -> None:
         """Initialize the Tor session and socket server."""
         # Check for existing session
@@ -3182,7 +4396,7 @@ class OnionSearchTUI(App):
             return
 
         # Create Tor session
-        self._tor_session = TorSession()
+        self._tor_session = TorSession(mode=resolve_mode())
 
         # Add Tor connection operation
         card = self._add_operation("Connecting to Tor network", spinner_type="braille")
@@ -3469,6 +4683,10 @@ class HeadlessOnionSession:
                 f.write(line + "\n")
         print(line, file=sys.stderr)
 
+    def log_browser_action(self, action: str, detail: str = "") -> None:
+        """Log a browser automation action."""
+        self.log(f"Browser: {action} {detail}".rstrip())
+
     def start(self) -> int:
         """
         Start the headless Tor session.
@@ -3484,7 +4702,7 @@ class HeadlessOnionSession:
         self.log("Starting Tor connection...")
 
         # Create Tor session
-        self._tor_session = TorSession()
+        self._tor_session = TorSession(mode=resolve_mode())
         success, message, duration = self._tor_session.start_tor()
 
         if not success:
@@ -3720,12 +4938,18 @@ def main():
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Onion Search MCP TUI")
+    global _CLI_MODE
+
+    parser = argparse.ArgumentParser(description="Tor Browser MCP TUI")
     parser.add_argument("--headless", action="store_true",
                         help="Run in headless mode (no UI)")
     parser.add_argument("--log-file", type=Path,
                         help="Log file path for headless mode")
+    parser.add_argument("--mode", choices=["tui", "browser"],
+                        help="Session mode (overrides config.toml [server] mode; default: browser)")
     args = parser.parse_args()
+    _CLI_MODE = args.mode
+    mode = resolve_mode()
 
     # Check for existing session first
     existing = check_existing_session()
@@ -3749,7 +4973,8 @@ def main():
         if log_file_config:
             log_file = Path(log_file_config)
 
-    if headless:
+    if mode == "browser" or headless:
+        # Browser mode is a socket-driven daemon: never the Textual UI.
         session = HeadlessOnionSession(log_file=log_file)
         try:
             session.start()

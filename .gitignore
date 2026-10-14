@@ -1,0 +1,34 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+
+# ---- Installer-generated / per-machine artifacts ----
+# (downloaded Tor Browser + geckodriver, tor state, machine-specific config,
+#  live daemon PID/socket port — none belong in the repo)
+components/
+tor_data/
+config.toml
+.onion-session.json
+Start Onion Session.command
+Start Onion Session (Headless).command
+Start Onion Session.sh
+Start Onion Session (Headless).sh
+Start Onion Session.bat
+Start Onion Session (Headless).bat
+
+# ---- Logs & local media ----
+*.log
+nohup.out
+video/
+
+# ---- Local agent config (may contain API keys) ----
+opencode.json
+opencode.jsonc
+.opencode/
+
+# ---- OS noise ----
+.DS_Store
+Thumbs.db
+
+.playwright-mcp/
